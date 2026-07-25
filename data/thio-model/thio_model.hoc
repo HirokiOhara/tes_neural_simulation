@@ -1,0 +1,12 @@
+load_file("cFiberBuilder.hoc")
+load_file("balance.hoc")
+
+D = 0.8
+len = 100
+type = 1
+celsius = 37
+ParticleID = 1
+v_init = -58.49
+
+objref fiber
+fiber = new cFiberBuilder(D,len,type,celsius,50/6,ParticleID)

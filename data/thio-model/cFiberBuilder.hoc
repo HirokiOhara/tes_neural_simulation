@@ -1,0 +1,142 @@
+// Created by Brandon Thio 7 February 2018
+begintemplate cFiberBuilder
+// builds the Thio c Fiber model
+// Parameters:Fiber Diameter, number of segments, type, temperature
+
+public fiberD, nsegments, dx, Length,v
+public section, sl, section_coord
+objref section[1], section_coord, sl, conductances,conduct,InFile
+create node[1]
+strdef name
+
+proc global_parameters(){
+	dx=segdensity //um
+	nsegments = int(len/dx)
+	Length = nsegments*dx
+  }
+
+proc build(){ 
+  //Setup lists
+  objref section[nsegments]
+  section_coord = new Vector(nsegments,0)
+  create node[nsegments]
+  sl = new SectionList()
+  
+  for i=0,nsegments-1{
+		node[i]{ 
+			//Setup and Geometry
+			ii = i
+			section[i] = new SectionRef()
+			//sl.append(section[i])  NEURON 8.x では SectionRef オブジェクトを SectionList.append() に直接渡せない。 (ohara, 2025.05.24)
+			section[i] sl.append()	// 渡したいもの_sl.append() のフォーマットで渡せる (https://www.neuronsimulator.org/en/9.0.0/progref/modelspec/programmatic/topology/seclist.html)
+			section_coord.x[ii] = (.5*dx + i*dx - Length/2) * 1e-6
+			nseg = 1
+			diam = fiberD
+			L  = dx
+			
+			//Inserted Mechanisms
+			insert nav7	
+			insert newnav8
+			insert nav9
+			insert bk
+			insert cav12
+			insert cav22
+			insert caextscale
+			insert caintscale
+			insert km
+			insert hcn
+			insert kv21
+			insert ka34
+			insert ka14
+			insert sk
+			insert nacx
+			insert naoi
+			insert koi
+			insert NaKpumpSchild
+			insert leak
+			insert extrapump
+			insert extracellular
+			xg = 1e10 // short circuit
+			xc = 0    // short circuit
+			
+			// Ionic Mechanisms
+			R = 8314
+			F = 96485.3329
+			cao0_ca_ion = 2.0							// [mM] Initial Cao Concentration
+			cai0_ca_ion = 0.000117						// [mM] Initial Cai Concentrations
+			ko = 5.4									// [mM] External K Concentration
+			ki = 145.0									// [mM] Internal K Concentration
+			kstyle=ion_style("k_ion",3,2,1,1,0) 		// Allows ek to be calculated manually
+			ek = ((R*(celsius+273.15))/F)*log(ko/ki)	// Manual Calculation of ek in order to use Schild F and R values
+			
+			nao = 154.0									// [mM] External Na Concentration
+			nai = 8.9									// [mM] Internal Na Concentration
+			nastyle=ion_style("na_ion",3,2,1,1,0) 		// Allows ena to be calculated manually
+			ena = ((R*(celsius+273.15))/F)*log(nao/nai)	// Manual Calculation of ena in order to use Schild F and R values
+				
+			// Read/Calculate Values for Ion Channels
+			conduct=new Vector()
+			InFile=new File()
+			sprint(name,"ConductanceSets/Particle%d.dat",ParticleIndex)
+			InFile.ropen(name)
+			conduct.scanf(InFile)
+			InFile.close()
+			gbar_nav7=conduct.x(0)
+			gbar_newnav8=conduct.x(1)
+			gbar_nav9=conduct.x(2)
+			gbar_bk=conduct.x(3)
+			gbar_cav12=conduct.x(4)
+			gbar_cav22=conduct.x(5)
+			gbar_km=conduct.x(6)
+			gbar_hcn=conduct.x(7)
+			gbar_kv21=conduct.x(8)
+			gbar_ka34=conduct.x(9)
+			gbar_ka14=conduct.x(10)
+			gbar_sk=conduct.x(11)
+			gbar_nacx=conduct.x(12)
+			Ra=conduct.x(14)
+			INaKmax22_NaKpumpSchild=conduct.x(13)
+			cm = 1.326291192
+			L_caintscale = L
+			nseg_caintscale = nseg
+			L_caextscale = L
+			nseg_caextscale = nseg
+		}
+		
+	}
+	//==== hocファイルの接続部分が逆方向に接続されている ====
+	// NEURONの'connect'は、connect child(child_end), parent(parent_end) で接続する
+	// Thio modelそのままだと、'node[11] → node[10] → ... → node[0]'という順になっていて間違いではないが想定とは異なる。
+	//for i=0, nsegments-2 {
+	//	connect node[i](1), node[i+1](0)	
+	//} 
+	//==== 以下、修正版 ====
+	for i=0, nsegments-2 {{
+		connect node[i+1](0), node[i](1)	
+	}}
+	//================================
+}
+
+proc init(){
+  fiberD = 6 //default if no arg
+  len = 21 //default if no arg
+  type = 1
+  temp = 37  //uF/cm2
+  segdensity=50/6
+  insert97na=0
+  ParticleIndex=1
+  
+  //Loaded Values
+  fiberD=$1
+  len=$2
+  type=$3
+  temp=$4
+  segdensity=$5
+  ParticleIndex=$6
+  
+  celsius = temp
+  global_parameters() 
+  build()
+}
+
+endtemplate cFiberBuilder

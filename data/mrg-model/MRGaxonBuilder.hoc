@@ -1,0 +1,324 @@
+// McIntyre et al. 2002 PNS myelinated axon model
+// Modified to accept fiber length specification
+
+begintemplate MRGaxonBuilder
+
+public fiberD, axonnodes, paranodes1, paranodes2, axoninter, axontotal
+public celsius, v_init, dt, tstop
+public nodelength, paralength1, paralength2, interlength
+public deltax, nodeD, paraD1, paraD2, axonD, g, nl
+public Rpn0, Rpn1, Rpn2, Rpx, space_p1, space_p2, space_i, rhoa, mycm, mygm
+public total_length_um
+
+public sl_nodes, sl_all
+public node, MYSA, FLUT, STIN
+public coord_node_x_m, coord_all_x_m
+
+public build, init_sim
+public get_compartment_type, get_compartment_local_index
+public n_all
+
+objref sl_nodes, sl_all, coord_node_x_m, coord_all_x_m
+
+create node[1], MYSA[1], FLUT[1], STIN[1]
+
+/**************** defaults ****************/
+proc model_globals() {
+    celsius = 37
+    v_init  = -80
+    dt      = 0.005
+    tstop   = 10
+
+    // morphology
+    fiberD      = 8.7
+    paralength1 = 3
+    nodelength  = 1.0
+    space_p1 = 0.002
+    space_p2 = 0.004
+    space_i  = 0.004
+
+    // electrical
+    rhoa = 0.7e6
+    mycm = 0.1
+    mygm = 0.001
+}
+
+proc dependent_var() {
+    if (fiberD==5.7)  {g=0.605 axonD=3.4  nodeD=1.9  paraD1=1.9  paraD2=3.4  deltax=500  paralength2=35 nl=80}
+    if (fiberD==7.3)  {g=0.630 axonD=4.6  nodeD=2.4  paraD1=2.4  paraD2=4.6  deltax=750  paralength2=38 nl=100}
+    if (fiberD==8.7)  {g=0.661 axonD=5.8  nodeD=2.8  paraD1=2.8  paraD2=5.8  deltax=1000 paralength2=40 nl=110}
+    if (fiberD==10.0) {g=0.690 axonD=6.9  nodeD=3.3  paraD1=3.3  paraD2=6.9  deltax=1150 paralength2=46 nl=120}
+    if (fiberD==11.5) {g=0.700 axonD=8.1  nodeD=3.7  paraD1=3.7  paraD2=8.1  deltax=1250 paralength2=50 nl=130}
+    if (fiberD==12.8) {g=0.719 axonD=9.2  nodeD=4.2  paraD1=4.2  paraD2=9.2  deltax=1350 paralength2=54 nl=135}
+    if (fiberD==14.0) {g=0.739 axonD=10.4 nodeD=4.7  paraD1=4.7  paraD2=10.4 deltax=1400 paralength2=56 nl=140}
+    if (fiberD==15.0) {g=0.767 axonD=11.5 nodeD=5.0  paraD1=5.0  paraD2=11.5 deltax=1450 paralength2=58 nl=145}
+    if (fiberD==16.0) {g=0.791 axonD=12.7 nodeD=5.5  paraD1=5.5  paraD2=12.7 deltax=1500 paralength2=60 nl=150}
+
+    Rpn0=(rhoa*.01)/(PI*((((nodeD/2)+space_p1)^2)-((nodeD/2)^2)))
+    Rpn1=(rhoa*.01)/(PI*((((paraD1/2)+space_p1)^2)-((paraD1/2)^2)))
+    Rpn2=(rhoa*.01)/(PI*((((paraD2/2)+space_p2)^2)-((paraD2/2)^2)))
+    Rpx =(rhoa*.01)/(PI*((((axonD/2)+space_i )^2)-((axonD/2)^2)))
+
+    interlength=(deltax-nodelength-(2*paralength1)-(2*paralength2))/6
+}
+
+// Calculate topology from length
+// length_um: desired fiber length in micrometers
+// Returns: number of internodes needed (axonnodes = internodes + 1)
+proc calc_topology_from_length() { local length_um, n_internodes
+    length_um = $1
+    
+    // number of internodes = ceil(length_um / deltax)
+    n_internodes = int(length_um / deltax)
+    if (n_internodes * deltax < length_um) {
+        n_internodes = n_internodes + 1
+    }
+    
+    // minimum 1 internode (2 nodes)
+    if (n_internodes < 1) {
+        n_internodes = 1
+    }
+    
+    axonnodes   = n_internodes + 1
+    paranodes1  = 2 * n_internodes
+    paranodes2  = 2 * n_internodes
+    axoninter   = 6 * n_internodes
+    axontotal   = axonnodes + paranodes1 + paranodes2 + axoninter
+    
+    // actual total length
+    total_length_um = n_internodes * deltax
+}
+
+/**************** build ****************/
+proc build() { local i, idx
+    create node[axonnodes], MYSA[paranodes1], FLUT[paranodes2], STIN[axoninter]
+
+    sl_nodes = new SectionList()
+    sl_all   = new SectionList()
+
+    coord_node_x_m = new Vector(axonnodes, 0)
+    coord_all_x_m  = new Vector(axontotal, 0)
+
+    // --- nodes ---
+    for i=0,axonnodes-1 {
+        node[i] {
+            nseg=1
+            diam=nodeD
+            L=nodelength
+            Ra=rhoa/10000
+            cm=2
+            insert axnode
+            insert extracellular
+            xraxial=Rpn0  xg=1e10  xc=0
+        }
+        node[i] sl_nodes.append()
+    }
+
+    // --- MYSA ---
+    for i=0, paranodes1-1 {
+        MYSA[i] {
+            nseg=1
+            diam=fiberD
+            L=paralength1
+            Ra=rhoa*(1/(paraD1/fiberD)^2)/10000
+            cm=2*paraD1/fiberD
+            insert pas
+            g_pas=0.001*paraD1/fiberD
+            e_pas=-80
+            insert extracellular
+            xraxial=Rpn1 xg=mygm/(nl*2) xc=mycm/(nl*2)
+        }
+    }
+
+    // --- FLUT ---
+    for i=0, paranodes2-1 {
+        FLUT[i] {
+            nseg=1
+            diam=fiberD
+            L=paralength2
+            Ra=rhoa*(1/(paraD2/fiberD)^2)/10000
+            cm=2*paraD2/fiberD
+            insert pas
+            g_pas=0.0001*paraD2/fiberD
+            e_pas=-80
+            insert extracellular
+            xraxial=Rpn2 xg=mygm/(nl*2) xc=mycm/(nl*2)
+        }
+    }
+
+    // --- STIN ---
+    for i=0, axoninter-1 {
+        STIN[i] {
+            nseg=1
+            diam=fiberD
+            L=interlength
+            Ra=rhoa*(1/(axonD/fiberD)^2)/10000
+            cm=2*axonD/fiberD
+            insert pas
+            g_pas=0.0001*axonD/fiberD
+            e_pas=-80
+            insert extracellular
+            xraxial=Rpx xg=mygm/(nl*2) xc=mycm/(nl*2)
+        }
+    }
+
+    // --- connectivity ---
+    for i=0, axonnodes-2 {
+        connect MYSA[2*i](0), node[i](1)
+        connect FLUT[2*i](0), MYSA[2*i](1)
+        connect STIN[6*i](0), FLUT[2*i](1)
+        connect STIN[6*i+1](0), STIN[6*i](1)
+        connect STIN[6*i+2](0), STIN[6*i+1](1)
+        connect STIN[6*i+3](0), STIN[6*i+2](1)
+        connect STIN[6*i+4](0), STIN[6*i+3](1)
+        connect STIN[6*i+5](0), STIN[6*i+4](1)
+        connect FLUT[2*i+1](0), STIN[6*i+5](1)
+        connect MYSA[2*i+1](0), FLUT[2*i+1](1)
+        connect node[i+1](0), MYSA[2*i+1](1)
+    }
+
+    // --- build sl_all in axial order ---
+    idx = 0
+    cumulative_x = 0
+    
+    for i=0, axonnodes-2 {
+        // node[i]
+        node[i] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + nodelength/2) * 1e-6
+        cumulative_x = cumulative_x + nodelength
+        idx = idx + 1
+        
+        // MYSA[2*i]
+        MYSA[2*i] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + paralength1/2) * 1e-6
+        cumulative_x = cumulative_x + paralength1
+        idx = idx + 1
+        
+        // FLUT[2*i]
+        FLUT[2*i] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + paralength2/2) * 1e-6
+        cumulative_x = cumulative_x + paralength2
+        idx = idx + 1
+        
+        // STIN[6*i] ~ STIN[6*i+5]
+        STIN[6*i] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + interlength/2) * 1e-6
+        cumulative_x = cumulative_x + interlength
+        idx = idx + 1
+        
+        STIN[6*i+1] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + interlength/2) * 1e-6
+        cumulative_x = cumulative_x + interlength
+        idx = idx + 1
+        
+        STIN[6*i+2] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + interlength/2) * 1e-6
+        cumulative_x = cumulative_x + interlength
+        idx = idx + 1
+        
+        STIN[6*i+3] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + interlength/2) * 1e-6
+        cumulative_x = cumulative_x + interlength
+        idx = idx + 1
+        
+        STIN[6*i+4] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + interlength/2) * 1e-6
+        cumulative_x = cumulative_x + interlength
+        idx = idx + 1
+        
+        STIN[6*i+5] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + interlength/2) * 1e-6
+        cumulative_x = cumulative_x + interlength
+        idx = idx + 1
+        
+        // FLUT[2*i+1]
+        FLUT[2*i+1] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + paralength2/2) * 1e-6
+        cumulative_x = cumulative_x + paralength2
+        idx = idx + 1
+        
+        // MYSA[2*i+1]
+        MYSA[2*i+1] sl_all.append()
+        coord_all_x_m.x[idx] = (cumulative_x + paralength1/2) * 1e-6
+        cumulative_x = cumulative_x + paralength1
+        idx = idx + 1
+    }
+    
+    // 最後のノード
+    node[axonnodes-1] sl_all.append()
+    coord_all_x_m.x[idx] = (cumulative_x + nodelength/2) * 1e-6
+
+    // --- node座標も同様に計算 ---
+    for i=0, axonnodes-1 {
+        coord_node_x_m.x[i] = i * deltax * 1e-6 + nodelength/2 * 1e-6
+    }
+}
+
+proc init_sim() {
+    finitialize(v_init)
+    fcurrent()
+}
+
+func n_all() {
+    return axontotal
+}
+
+func get_compartment_type() { local k, j
+    k = $1
+    if (k < 0) { k = 0 }
+    if (k >= axontotal) { k = axontotal-1 }
+    if (k == axontotal-1) { return 0 }
+
+    j = k - 11*int(k/11)
+    if (j==0) { return 0 }
+    if (j==1) { return 1 }
+    if (j==2) { return 2 }
+    if (j>=3 && j<=8) { return 3 }
+    if (j==9) { return 2 }
+    return 1
+}
+
+func get_compartment_local_index() { local k, i, j
+    k = $1
+    if (k < 0) { k = 0 }
+    if (k >= axontotal) { k = axontotal-1 }
+    if (k == axontotal-1) { return axonnodes-1 }
+
+    i = int(k/11)
+    j = k - 11*i
+
+    if (j==0) { return i }
+    if (j==1) { return 2*i }
+    if (j==2) { return 2*i }
+    if (j>=3 && j<=8) { return 6*i + (j-3) }
+    if (j==9) { return 2*i + 1 }
+    return 2*i + 1
+}
+
+/**************** constructor ****************/
+// Usage:
+//   MRGaxonBuilder(fiberD)             - default length (20 internodes)
+//   MRGaxonBuilder(fiberD, length_um)  - specified length
+
+proc init() { local length_um
+    model_globals()
+    
+    // parse arguments
+    if (numarg() >= 1) { fiberD = $1 }
+    
+    // get deltax from fiberD
+    dependent_var()
+    
+    // calculate topology
+    if (numarg() >= 2) {
+        length_um = $2
+    } else {
+        length_um = 20 * deltax  // default: 20 internodes
+    }
+    calc_topology_from_length(length_um)
+    
+    build()
+    init_sim()
+}
+
+endtemplate MRGaxonBuilder
